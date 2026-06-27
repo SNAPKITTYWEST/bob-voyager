@@ -615,20 +615,42 @@ function updateOrbitHUD() {
   }
 }
 
+// Try local backend first, fall back to direct API
+const BACKEND = (() => {
+  const local = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  return local ? `http://${window.location.hostname}:4299` : null;
+})();
+
 async function fetchISS() {
   try {
-    const r = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
-    const d = await r.json();
+    let d, gs = null;
+    if (BACKEND) {
+      const r = await fetch(`${BACKEND}/api/telemetry`);
+      const body = await r.json();
+      d  = body.telemetry;
+      gs = body.ground_stations;
+      // show backend WORM head
+      document.getElementById('top-worm').textContent = 'WORM[SRV]: ' + (body.worm_head||'').slice(0,14)+'...';
+    } else {
+      const r = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
+      d = await r.json();
+    }
     iss.lat=d.latitude; iss.lon=d.longitude; iss.alt=d.altitude;
-    iss.vel=d.velocity; iss.timestamp=d.timestamp; iss.fetched=true;
+    iss.vel=d.velocity; iss.timestamp=d.timestamp||Date.now()/1000; iss.fetched=true;
     track.push({lat:iss.lat,lon:iss.lon}); if(track.length>150)track.shift();
     document.getElementById('h-lat').textContent = iss.lat.toFixed(4)+'°';
     document.getElementById('h-lon').textContent = iss.lon.toFixed(4)+'°';
     document.getElementById('h-vel').textContent = iss.vel.toFixed(0)+' km/h';
     const T=2*Math.PI*Math.sqrt((R_EARTH+iss.alt)**3/MU)/60;
     document.getElementById('h-per').textContent = T.toFixed(2)+' min';
+    // If backend returned ground stations, update HUD from server data
+    if (gs) {
+      document.getElementById('h-sf').textContent  = 'SF:   '+gs.SF.dist_km+' km'+(gs.SF.in_contact?' ◉':'');
+      document.getElementById('h-jsc').textContent = 'JSC:  '+gs.JSC.dist_km+' km'+(gs.JSC.in_contact?' ◉':'');
+      document.getElementById('h-mos').textContent = 'TsUP: '+gs.TSUP.dist_km+' km'+(gs.TSUP.in_contact?' ◉':'');
+    }
     updateOrbitHUD();
-    await wormSeal(`ISS|${iss.lat.toFixed(2)}|${iss.lon.toFixed(2)}|${iss.alt.toFixed(1)}`);
+    if (!BACKEND) await wormSeal(`ISS|${iss.lat.toFixed(2)}|${iss.lon.toFixed(2)}|${iss.alt.toFixed(1)}`);
     drawGlobe();
   } catch(e) { console.warn('ISS fetch failed:',e); }
 }
